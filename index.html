@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>4K Music Visualizer</title>
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    background:#000;
+    color:white;
+    font-family:Arial, sans-serif;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:20px;
+    overflow:hidden;
+}
+
+.controls{
+    width:320px;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    background:#111;
+    padding:20px;
+    border-radius:20px;
+}
+
+input,
+select,
+button{
+    padding:12px;
+    border:none;
+    border-radius:12px;
+    font-size:15px;
+}
+
+button{
+    background:white;
+    color:black;
+    cursor:pointer;
+    font-weight:bold;
+}
+
+button:hover{
+    opacity:0.9;
+}
+
+canvas{
+    width:90vw;
+    max-width:1400px;
+    border-radius:20px;
+    background:black;
+    box-shadow:0 0 30px rgba(255,255,255,0.1);
+}
+</style>
+</head>
+<body>
+
+<div class="controls">
+
+    <input type="file" id="imageInput" accept="image/png,image/jpeg,image/webp">
+
+    <input type="file" id="audioInput" accept="audio/*">
+
+    <select id="resolution">
+        <option value="1280x720">720p</option>
+        <option value="1920x1080" selected>1080p</option>
+        <option value="2560x1440">1440p</option>
+        <option value="3840x2160">4K</option>
+    </select>
+
+    <button id="startBtn">Start Visualizer</button>
+
+    <button id="exportBtn">Export Video</button>
+
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+const imageInput = document.getElementById("imageInput");
+const audioInput = document.getElementById("audioInput");
+const resolutionSelect = document.getElementById("resolution");
+
+let bgImage = new Image();
+
+let audio;
+let audioContext;
+let analyser;
+let source;
+let dataArray;
+
+function updateResolution(){
+
+    const parts = resolutionSelect.value.split("x");
+
+    canvas.width = parseInt(parts[0]);
+    canvas.height = parseInt(parts[1]);
+}
+
+updateResolution();
+
+resolutionSelect.addEventListener("change", updateResolution);
+
+imageInput.addEventListener("change", (e)=>{
+
+    const file = e.target.files[0];
+
+    if(file){
+
+        bgImage.src = URL.createObjectURL(file);
+    }
+});
+
+document.getElementById("startBtn").onclick = async ()=>{
+
+    const file = audioInput.files[0];
+
+    if(!file){
+
+        alert("Upload an audio file");
+        return;
+    }
+
+    audio = new Audio(URL.createObjectURL(file));
+
+    audio.crossOrigin = "anonymous";
+
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+    source = audioContext.createMediaElementSource(audio);
+
+    analyser = audioContext.createAnalyser();
+
+    analyser.fftSize = 512;
+
+    const bufferLength = analyser.frequencyBinCount;
+
+    dataArray = new Uint8Array(bufferLength);
+
+    source.connect(analyser);
+
+    analyser.connect(audioContext.destination);
+
+    audio.play();
+
+    animate();
+};
+
+function animate(){
+
+    requestAnimationFrame(animate);
+
+    if(!analyser) return;
+
+    analyser.getByteFrequencyData(dataArray);
+
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    if(bgImage.src){
+
+        ctx.drawImage(bgImage,0,0,canvas.width,canvas.height);
+    }
+
+    const barWidth = canvas.width / dataArray.length;
+
+    for(let i = 0; i < dataArray.length; i++){
+
+        const value = dataArray[i];
+
+        const percent = value / 255;
+
+        const barHeight = percent * (canvas.height * 0.22);
+
+        const x = i * barWidth;
+
+        const y = canvas.height - barHeight - 15;
+
+        ctx.fillStyle = "white";
+
+        ctx.fillRect(
+            x,
+            y,
+            barWidth - 2,
+            barHeight
+        );
+    }
+}
+
+document.getElementById("exportBtn").onclick = ()=>{
+
+    if(!audio){
+
+        alert("Start visualizer first");
+        return;
+    }
+
+    const canvasStream = canvas.captureStream(60);
+
+    const audioStream = audio.captureStream();
+
+    const combinedStream = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...audioStream.getAudioTracks()
+    ]);
+
+    const recorder = new MediaRecorder(combinedStream,{
+        mimeType:"video/webm"
+    });
+
+    const chunks = [];
+
+    recorder.ondataavailable = e=>{
+
+        if(e.data.size > 0){
+
+            chunks.push(e.data);
+        }
+    };
+
+    recorder.onstop = ()=>{
+
+        const blob = new Blob(chunks,{
+            type:"video/webm"
+        });
+
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+
+        a.href = url;
+
+        a.download = "visualizer.webm";
+
+        a.click();
+    };
+
+    recorder.start();
+
+    audio.currentTime = 0;
+
+    audio.play();
+
+    audio.onended = ()=>{
+
+        recorder.stop();
+    };
+};
+</script>
+
+</body>
+</html>
